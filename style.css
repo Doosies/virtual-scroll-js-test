@@ -1,0 +1,24 @@
+#scroll-container {
+  height: 500px; /* 뷰포트 높이를 고정 */
+  width: 100%;
+  border: 2px solid #333;
+  overflow-y: auto; /* 이 요소에서 스크롤 발생 */
+  position: relative;
+}
+
+#list-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  /* 높이는 JS로 동적으로 설정됨 */
+}
+
+.item {
+  position: absolute;
+  left: 0;
+  right: 0;
+  padding: 10px;
+  border-bottom: 1px solid #eee;
+  box-sizing: border-box;
+}
