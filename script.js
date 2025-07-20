@@ -1,6 +1,5 @@
-// 설정을 상단에 상수로 정의하여 관리 용이성을 높임
 const CONFIG = {
-    TOTAL_ITEMS: 1000,
+    TOTAL_ITEMS: 1000000,
     ESTIMATED_ITEM_HEIGHT: 60,
     OVERSCAN_COUNT: 5,
 };
@@ -17,37 +16,36 @@ class VirtualScroller {
         this.items = items;
         this.heightCache = {};
         this.isRenderScheduled = false;
+        this.scrollAnchor = { index: 0, offset: 0 };
 
-        // ResizeObserver 콜백에서 this 컨텍스트를 유지하기 위해 바인딩
-        this._handleResize = this._handleResize.bind(this);
-        this.observer = new ResizeObserver(this._handleResize);
+        this.observer = new ResizeObserver(this.#handleResize.bind(this));
     }
 
-    /** 캐시 또는 추정 높이를 반환합니다. */
-    _getCachedHeight(index) {
+    /** 캐시 또는 추정 높이를 반환*/
+    #getCachedHeight(index) {
         return this.heightCache[index] ?? CONFIG.ESTIMATED_ITEM_HEIGHT;
     }
 
-    /** 전체 리스트의 총 높이를 계산합니다. */
-    _calculateTotalHeight() {
+    /** 전체 리스트의 총 높이를 계산 */
+    #calculateTotalHeight() {
         let totalHeight = 0;
         for (let i = 0; i < CONFIG.TOTAL_ITEMS; i++) {
-            totalHeight += this._getCachedHeight(i);
+            totalHeight += this.#getCachedHeight(i);
         }
         return totalHeight;
     }
 
-    /** 특정 인덱스의 Y축 오프셋(top 위치)을 계산합니다. */
-    _getOffsetForIndex(index) {
+    /** 특정 인덱스의 Y축 오프셋(top 위치)을 계산 */
+    #getOffsetForIndex(index) {
         let offset = 0;
         for (let i = 0; i < index; i++) {
-            offset += this._getCachedHeight(i);
+            offset += this.#getCachedHeight(i);
         }
         return offset;
     }
 
-    /** 렌더링할 아이템의 범위를 계산합니다. */
-    _calculateVisibleRange() {
+    /** 렌더링할 아이템의 범위를 계산*/
+    #calculateVisibleRange() {
         const scrollTop = this.scrollContainer.scrollTop;
         const viewportHeight = this.scrollContainer.clientHeight;
 
@@ -55,7 +53,7 @@ class VirtualScroller {
         let startOffset = 0;
         // 시작 인덱스 찾기
         while (startOffset < scrollTop && startIndex < CONFIG.TOTAL_ITEMS) {
-            startOffset += this._getCachedHeight(startIndex);
+            startOffset += this.#getCachedHeight(startIndex);
             startIndex++;
         }
 
@@ -66,7 +64,7 @@ class VirtualScroller {
             endOffset < scrollTop + viewportHeight &&
             endIndex < CONFIG.TOTAL_ITEMS
         ) {
-            endOffset += this._getCachedHeight(endIndex);
+            endOffset += this.#getCachedHeight(endIndex);
             endIndex++;
         }
 
@@ -80,10 +78,10 @@ class VirtualScroller {
         };
     }
 
-    /** 단일 아이템 DOM 요소를 생성합니다. */
-    _createItemElement(index) {
+    /** 단일 아이템 DOM 요소를 생성*/
+    #createItemElement(index) {
         const itemData = this.items[index];
-        const top = this._getOffsetForIndex(index);
+        const top = this.#getOffsetForIndex(index);
 
         const element = document.createElement('div');
         element.dataset.index = index;
@@ -96,23 +94,45 @@ class VirtualScroller {
         return element;
     }
 
-    /** 렌더링을 스케줄링합니다. */
-    _scheduleRender() {
+    /** 렌더링 직전, 현재 화면의 기준점을 포착*/
+    #captureScrollAnchor() {
+        const scrollTop = this.scrollContainer.scrollTop;
+        let index = 0;
+        let currentOffset = 0;
+
+        // ✨ 수정된 부분
+        while (currentOffset < scrollTop && index < CONFIG.TOTAL_ITEMS) {
+            // 개별 아이템의 높이를 순차적으로 더함
+            currentOffset += this.#getCachedHeight(index);
+            index++;
+        }
+
+        const correctIndex = Math.max(0, index - 1);
+        this.scrollAnchor = {
+            index: correctIndex,
+            offset: scrollTop - this.#getOffsetForIndex(correctIndex),
+        };
+    }
+
+    /** 렌더링을 스케줄링 */
+    #scheduleRender() {
         if (this.isRenderScheduled) return;
         this.isRenderScheduled = true;
         requestAnimationFrame(() => {
-            this._render();
+            this.#render();
             this.isRenderScheduled = false;
         });
     }
 
-    /** 화면을 렌더링합니다. */
-    _render() {
-        const { startIndex, endIndex } = this._calculateVisibleRange();
+    /** 화면을 렌더 */
+    #render() {
+        this.#captureScrollAnchor();
+
+        const { startIndex, endIndex } = this.#calculateVisibleRange();
         const fragment = document.createDocumentFragment();
 
         for (let i = startIndex; i <= endIndex; i++) {
-            const element = this._createItemElement(i);
+            const element = this.#createItemElement(i);
             fragment.appendChild(element);
 
             if (this.heightCache[i] === undefined) {
@@ -122,9 +142,11 @@ class VirtualScroller {
         this.listContainer.replaceChildren(fragment);
     }
 
-    /** ResizeObserver 콜백 핸들러입니다. */
-    _handleResize(entries) {
+    /** ResizeObserver 콜백 핸들러 */
+    #handleResize(entries) {
         let needsUpdate = false;
+        const oldAnchorY = this.#getOffsetForIndex(this.scrollAnchor.index);
+
         for (const entry of entries) {
             const element = entry.target;
             const index = Number(element.dataset.index);
@@ -139,23 +161,28 @@ class VirtualScroller {
             }
         }
         if (needsUpdate) {
-            this.listContainer.style.height = `${this._calculateTotalHeight()}px`;
-            this._scheduleRender();
+            this.listContainer.style.height = `${this.#calculateTotalHeight()}px`;
+
+            const newAnchorY = this.#getOffsetForIndex(this.scrollAnchor.index);
+            const delta = newAnchorY - oldAnchorY;
+            this.scrollContainer.scrollTop += delta;
+
+            this.#scheduleRender();
         }
     }
 
-    /** 스크롤 이벤트 핸들러입니다. */
-    _handleScroll() {
-        this._scheduleRender();
+    /** 스크롤 이벤트 핸들러 */
+    #handleScroll() {
+        this.#scheduleRender();
     }
 
-    /** 가상 스크롤러를 초기화하고 시작합니다. */
+    /** 가상 스크롤러를 초기화하고 시작 */
     init() {
-        this.listContainer.style.height = `${this._calculateTotalHeight()}px`;
-        this._render();
+        this.listContainer.style.height = `${this.#calculateTotalHeight()}px`;
+        this.#render();
         this.scrollContainer.addEventListener(
             'scroll',
-            this._handleScroll.bind(this)
+            this.#handleScroll.bind(this)
         );
     }
 }
@@ -178,3 +205,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     scroller.init();
 });
+
+// 지금 상태로는 스크롤이 튐
+// 보정로직 필요할듯
+// 높이변경 -> scrollTop 더하기
+
+// 근데 getOffsetForIndex, calculateVisibleRange에서 모든 아이템의 높이를 계싼함
+// 1000000 도달 안했는데 278877 에서 더이상 스크롤 못내림
